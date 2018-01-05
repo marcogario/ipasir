@@ -92,7 +92,7 @@ class IpasirLib(object):
         Required state: INPUT or SAT or UNSAT
         State after: INPUT
         """
-        self._lib.ipasir_add(solver, lit)
+        self._lib.ipasir_assume(solver, lit)
 
     def solve(self, solver):
         """Solve the formula under the specified assumptions.

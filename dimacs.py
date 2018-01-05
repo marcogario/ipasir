@@ -1,15 +1,13 @@
-import bz2
+from pysmt.smtlib.parser import open_
+from pysmt.shortcuts import FreshSymbol, Or, And, Not
 
-def open_(fname):
-    """Transparently handle .bz2 files."""
-    if fname.endswith(".bz2"):
-        return bz2.open(fname, "rt")
-    return open(fname)
-
-
-# Read dimacs problem
 def read_dimacs(fname):
+    """Read a DIMACS CNF file from the given file.
+
+    Returns a tuple: (vars_cnt, clauses, comments)
+    """
     prob_type, vars_cnt, clauses_cnt = None, None, None
+    max_var = 0
     comments = []
     clauses = []
 
@@ -21,7 +19,7 @@ def read_dimacs(fname):
                 _, prob_type, vars_cnt, clauses_cnt = line.split(" ")
                 prob_type = prob_type.strip()
                 if prob_type != "cnf":
-                    raise ValueError("File does not contain a cnf")
+                    raise IOError("File does not contain a cnf.")
                 vars_cnt = int(vars_cnt.strip())
                 clauses_cnt = int(clauses_cnt)
                 break
@@ -30,15 +28,50 @@ def read_dimacs(fname):
             if line[0] == "c":
                 comments.append(line)
             else:
-                cl = line.split(" ")
+                # TODO: More robust parsing of clauses
+                cl = line.strip().split(" ")
                 assert cl[-1].strip() == "0", cl
-                clauses.append([int(lit) for lit in cl[:-1]])
+                clause = [int(lit) for lit in cl[:-1]]
+                max_var = max(max_var, max(abs(lit) for lit in clause))
+                assert not any(lit == 0 for lit in clause), clause
+                clauses.append(clause)
 
-    # Validation (TODO)
-    # - Clauses match the numer defined
-    # - No variable above var_cnt
-    return vars_cnt, clauses_cnt, clauses, comments
+    # Validation
+    if clauses_cnt != len(clauses):
+        raise IOError("Mismatch between declared clauses (%d) " % clauses_cnt +
+                      "and actual clauses (%d) in DIMACS file." % len(clauses))
+    if max_var > vars_cnt:
+        raise IOError("Mismatch between declared variables (%d) " % vars_cnt +
+                      "and actual variables (%d) in DIMACS file." % max_var)
+
+    return vars_cnt, clauses, comments
+
+
+def dimacs_to_pysmt(vars_cnt, clauses, comments):
+    """Convert a DIMACS structure into a pySMT formula.
+
+    Returns (formula, symbol_table). The symbol_table contains a
+    mapping from pySMT symbol to DIMACS var_idx.
+
+    """
+    st = {}
+    rev_st = {}
+    for i in xrange(1, vars_cnt+1):
+        s = FreshSymbol(template=("_dimacs_%d"%i+"_%d"))
+        st[i] = s
+        st[-i] = Not(s)
+        rev_st[s] = i
+    res = And(Or(st[lit] for lit in clause) \
+              for clause in clauses)
+    return res, rev_st
+
+
 
 if __name__ == "__main__":
     import sys
-    print(read_dimacs(sys.argv[1]))
+    import time
+
+    dimacs = read_dimacs(sys.argv[1])
+    f, st = dimacs_to_pysmt(*dimacs)
+    print(f.size())
+    print(dimacs[2])
